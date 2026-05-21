@@ -48,7 +48,13 @@ For lab CZI/OME-TIFF folders, prefer the selected-channel batch wrapper:
 uv run python run_SODA_2D_pipeline.py \
   --input-dir "/path/to/full/input_images" \
   --output-dir "/path/to/pySODA_pipeline_output" \
-  --channels 0 2
+  --channels # #
+```
+
+
+```
+#try this for full param list:
+uv run python run_SODA_2D_pipeline.py --usage
 ```
 
 This command loads CZI/OME-TIFF/TIFF inputs, keeps only the selected channels, max-projects Z for 2D pySODA, and writes combined CSV/XLSX summaries. See `BATCH_README.md` for tuning options.
@@ -96,8 +102,6 @@ This command loads CZI/OME-TIFF/TIFF inputs, keeps only the selected channels, m
 **2 -** Execute run_soda.py. This will run the SODA analysis on every .tif image in the chosen `DIRECTORY` using the specified
 parameters.
 
-### Examples of segmentation parameters
-![Parameter examples](docs/images/param_ex.png)
 
 ## Output:
 
