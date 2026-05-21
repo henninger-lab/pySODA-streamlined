@@ -21,14 +21,10 @@ Then run commands through the locked environment:
 uv run python run_SODA_2D_pipeline.py \
   --input-dir "/path/to/full/input_images" \
   --output-dir "/path/to/pySODA_pipeline_output" \
-  --channels 0 2
+  --channels # #
 ```
 
-For the experimental 3D workflow, include the optional Torch dependency:
 
-```bash
-uv sync --locked --extra 3d
-```
 
 The older `requirements.txt` is kept for compatibility with the original pySODA workflow, but `pyproject.toml` plus `uv.lock` is the preferred reproducible setup.
 
@@ -56,13 +52,6 @@ uv run python run_SODA_2D_pipeline.py \
 ```
 
 This command loads CZI/OME-TIFF/TIFF inputs, keeps only the selected channels, max-projects Z for 2D pySODA, and writes combined CSV/XLSX summaries. See `BATCH_README.md` for tuning options.
-
-## Sharing on GitHub
-
-This clone tracks `https://github.com/FLClab/pySODA.git` as `origin`. For collaborative use, create a fork under your GitHub account or lab organization, push a branch containing these changes, and share that fork/branch. That keeps the upstream project intact while making this lab-specific workflow installable and citable.
-
-The `run_soda.py` allows the user to run the SODA analysis on all images within a chosen folder using
-chosen parameters.
 
 **1 -** Edit the parameters in the `run_soda.py` file:
   
@@ -127,15 +116,3 @@ and each couple from channels X and Y.
 **If `WRITE_HIST` is True**: A histogram of the coupling probability by the distance is saved as well.
  
 All of these outputs ares saved in the specified `OUTPUT_DIRECTORY`.
-
-## Experimental 3D OME-TIFF workflow
-
-The 3D workflow is separate from the original 2D pySODA scripts:
-
-```bash
-python run_SODA_3D.py
-```
-
-By default, this targets the Henninger Lab 260512 CTD/MED1 OME-TIFF stack, uses channel 0 as CTD and channel 2 as MED1, reads OME voxel sizes, and writes 3D spot tables, nearest-neighbor distances, shell probabilities, a summary workbook, and a max-projection QC image. Use `--crop z0:z1,y0:y1,x0:x1` for fast validation before running a full stack.
-
-The 3D workflow requires the scientific stack from the lab radial-plot/cellpose environment, including `tifffile`, `torch`, `scikit-image`, `scipy`, `pandas`, `openpyxl`, and `matplotlib`. By default it uses a separable MPS-friendly LoG implementation (`--log-method separable`) with YX tiling to avoid a slow dense 3D kernel. Use `--log-method dense` only as a correctness reference on cropped test regions.
