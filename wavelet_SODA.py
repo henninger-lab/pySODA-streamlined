@@ -8,6 +8,7 @@ from skimage.measure import regionprops, label
 from matplotlib import pyplot
 from math import atan2
 from scipy.ndimage import convolve
+from scipy.special import log_ndtr
 from scipy.spatial.distance import cdist
 
 
@@ -692,6 +693,58 @@ class SpatialRelations:
         pyplot.title("G0")
         pyplot.show()
 
+    def soda_significance(self, G0):
+        """
+        Original SODA global coupling test from Lagache et al. 2018.
+
+        Under the null hypothesis of random object placement, components of G0
+        are standard normal variables. The global p-value tests whether at least
+        one distance ring is enriched: p = 1 - CDF(max(G0)) ** N.
+        """
+        G0 = numpy.asarray(G0, dtype=float)
+        if G0.size == 0 or numpy.all(numpy.isnan(G0)):
+            return {
+                "g0_max": numpy.nan,
+                "g0_max_ring_index": None,
+                "g0_threshold": numpy.nan,
+                "soda_p_value": numpy.nan,
+                "soda_p_value_text": "nan",
+                "soda_p_value_log10": numpy.nan,
+                "n_significant_rings": 0,
+                "significant_ring_indices": [],
+            }
+
+        g0_max = float(numpy.nanmax(G0))
+        g0_max_ring_index = int(numpy.nanargmax(G0))
+        n_rings = int(G0.size)
+        threshold = float(numpy.sqrt(2 * numpy.log(n_rings)))
+        significant = numpy.where(G0 > threshold)[0]
+
+        log_survival = float(log_ndtr(-g0_max))
+        if log_survival < -36:
+            log_p_value = numpy.log(n_rings) + log_survival
+            p_value = float(numpy.exp(log_p_value))
+        else:
+            survival = numpy.exp(log_survival)
+            log_p_value = numpy.log(-numpy.expm1(n_rings * numpy.log1p(-survival)))
+            p_value = float(numpy.exp(log_p_value))
+        log10_p_value = float(log_p_value / numpy.log(10))
+
+        return {
+            "g0_max": g0_max,
+            "g0_max_ring_index": g0_max_ring_index,
+            "g0_threshold": threshold,
+            "soda_p_value": p_value,
+            "soda_p_value_text": (
+                "{:.6g}".format(p_value)
+                if p_value > 0
+                else "10^{:.3f}".format(log10_p_value)
+            ),
+            "soda_p_value_log10": log10_p_value,
+            "n_significant_rings": int(significant.size),
+            "significant_ring_indices": [int(i) for i in significant],
+        }
+
     def main2D_corr(self, G, var, A):
         """
         Currently unused
@@ -765,20 +818,22 @@ class SpatialRelations:
             prob_array[numpy.where(numpy.logical_and(self.rings[i] <= dist_array, dist_array < self.rings[i+1]))] = coupling[i]
         prob_array[dist_array == 0] = 0
 
-        # Create the list of lines for the couples excel file
-        n_couples = numpy.sum(prob_array > 0)
-        prob_write = []
-        for i in range(n1):
-            for j in range(n2):
-                if prob_array[i,j] > 0:
-                    prob_write.append([MPP1_array[i][1],
-                                       MPP1_array[i][0],
-                                       MPP2_array[j][1],
-                                       MPP2_array[j][0],
-                                       dist_array[i,j],
-                                       prob_array[i,j],
-                                       i,
-                                       j])
+        # Create the list of lines for the couples excel file.
+        positive_pairs = numpy.argwhere(prob_array > 0)
+        n_couples = int(positive_pairs.shape[0])
+        prob_write = [
+            [
+                MPP1_array[i, 1],
+                MPP1_array[i, 0],
+                MPP2_array[j, 1],
+                MPP2_array[j, 0],
+                dist_array[i, j],
+                prob_array[i, j],
+                int(i),
+                int(j),
+            ]
+            for i, j in positive_pairs
+        ]
 
         if numpy.sum(prob_array) > 0:
             coupling_index = (numpy.sum(prob_array)/n1, numpy.sum(prob_array)/n2)
@@ -787,12 +842,43 @@ class SpatialRelations:
             coupling_index = (0,0)
             mean_coupling_distance = None
 
+        significance = self.soda_significance(G0)
+        significant_ring_indices = significance["significant_ring_indices"]
+        significant_ring_labels = [
+            "{}-{}".format(self.rings[i], self.rings[i + 1])
+            for i in significant_ring_indices
+        ]
+        ring_metrics = []
+        for i in range(len(self.rings) - 1):
+            ring_metrics.append({
+                "ring_index": i,
+                "inner_radius_px": float(self.rings[i]),
+                "outer_radius_px": float(self.rings[i + 1]),
+                "G": float(G[i]),
+                "variance": float(var[i]),
+                "G0": float(G0[i]),
+                "G0_threshold": significance["g0_threshold"],
+                "significant": bool(G0[i] > significance["g0_threshold"]),
+                "coupling_probability": float(coupling[i]),
+            })
+
         return prob_write, {'n_spots_0': len(self.MPP1_ROI),
                             'n_spots_1': len(self.MPP2_ROI),
                             'coupling_index': coupling_index,
+                            'coupling_index_percent': (coupling_index[0] * 100, coupling_index[1] * 100),
                             'mean_coupling_distance': mean_coupling_distance,
                             'coupling_probabilities': coupling,
-                            'n_couples': n_couples}
+                            'n_couples': n_couples,
+                            'g0_max': significance["g0_max"],
+                            'g0_max_ring_index': significance["g0_max_ring_index"],
+                            'g0_threshold': significance["g0_threshold"],
+                            'soda_p_value': significance["soda_p_value"],
+                            'soda_p_value_text': significance["soda_p_value_text"],
+                            'soda_p_value_log10': significance["soda_p_value_log10"],
+                            'n_significant_rings': significance["n_significant_rings"],
+                            'significant_ring_indices': significant_ring_indices,
+                            'significant_ring_ranges_px': significant_ring_labels,
+                            'ring_metrics': ring_metrics}
 
     def data_boxplot(self, prob_write):
         """
@@ -837,7 +923,7 @@ class SpatialRelations:
         pyplot.savefig('boxplot_{}'.format(self.filename))
         pyplot.close()
 
-    def write_spots_and_probs(self, prob_write, directory, title, channels):
+    def write_spots_and_probs(self, prob_write, directory, title, channels, results=None):
         """
         Writes informations about couples and single spots
         :param prob_write: list containing lists of information to write about each couple
@@ -845,6 +931,62 @@ class SpatialRelations:
         :param title: name of the output excel file as string
         """
         workbook = xlsxwriter.Workbook(os.path.join(directory, title), {'nan_inf_to_errors': True})
+        channel1_coupled = numpy.zeros(len(self.MPP1_ROI), dtype=bool)
+        channel1_probability = numpy.zeros(len(self.MPP1_ROI), dtype=float)
+        channel2_coupled = numpy.zeros(len(self.MPP2_ROI), dtype=bool)
+        channel2_probability = numpy.zeros(len(self.MPP2_ROI), dtype=float)
+        for *_, probability, idx_1, idx_2 in prob_write:
+            channel1_coupled[idx_1] = True
+            channel1_probability[idx_1] = max(channel1_probability[idx_1], probability)
+            channel2_coupled[idx_2] = True
+            channel2_probability[idx_2] = max(channel2_probability[idx_2], probability)
+
+        if results is not None:
+            summary = workbook.add_worksheet(name='SODA summary')
+            summary_rows = [
+                ('Spots in channel {}'.format(channels[0]), results['n_spots_0']),
+                ('Spots in channel {}'.format(channels[1]), results['n_spots_1']),
+                ('Number of positive-probability pairs', results['n_couples']),
+                ('Coupling index channel {}'.format(channels[0]), results['coupling_index'][0]),
+                ('Coupling index channel {}'.format(channels[1]), results['coupling_index'][1]),
+                ('Coupling percent channel {}'.format(channels[0]), results['coupling_index_percent'][0]),
+                ('Coupling percent channel {}'.format(channels[1]), results['coupling_index_percent'][1]),
+                ('Weighted mean coupling distance (px)', results['mean_coupling_distance']),
+                ('SODA global p-value', results['soda_p_value']),
+                ('SODA global p-value display', results['soda_p_value_text']),
+                ('SODA global log10(p-value)', results['soda_p_value_log10']),
+                ('G0 max', results['g0_max']),
+                ('G0 max ring index', results['g0_max_ring_index']),
+                ('G0 universal threshold', results['g0_threshold']),
+                ('Number of significant rings', results['n_significant_rings']),
+                ('Significant ring indices', ', '.join(map(str, results['significant_ring_indices']))),
+                ('Significant ring ranges (px)', ', '.join(results['significant_ring_ranges_px'])),
+            ]
+            summary.write(0, 0, 'Metric')
+            summary.write(0, 1, 'Value')
+            for row_idx, (name, value) in enumerate(summary_rows, start=1):
+                summary.write(row_idx, 0, name)
+                summary.write(row_idx, 1, value)
+
+            rings = workbook.add_worksheet(name='SODA rings')
+            ring_titles = [
+                'Ring index', 'Inner radius (px)', 'Outer radius (px)', 'G',
+                'Variance', 'G0', 'G0 threshold', 'Significant',
+                'Coupling probability'
+            ]
+            for col_idx, header in enumerate(ring_titles):
+                rings.write(0, col_idx, header)
+            for row_idx, row_data in enumerate(results['ring_metrics'], start=1):
+                rings.write(row_idx, 0, row_data['ring_index'])
+                rings.write(row_idx, 1, row_data['inner_radius_px'])
+                rings.write(row_idx, 2, row_data['outer_radius_px'])
+                rings.write(row_idx, 3, row_data['G'])
+                rings.write(row_idx, 4, row_data['variance'])
+                rings.write(row_idx, 5, row_data['G0'])
+                rings.write(row_idx, 6, row_data['G0_threshold'])
+                rings.write(row_idx, 7, int(row_data['significant']))
+                rings.write(row_idx, 8, row_data['coupling_probability'])
+
         couples = workbook.add_worksheet(name='Couples')
         titles = ['X1', 'Y1', 'X2', 'Y2', 'Distance', 'Coupling probability']
 
@@ -867,21 +1009,20 @@ class SpatialRelations:
             dnn1_2, nn1, angle = self.neighbors[3][idx_2]
             dnn2_2, nn2, angle = self.neighbors[2][idx_2]
 
-            for index in range(len(p_list)):
-                datarow =[x1, y1, s1, dnn1_1, dnn2_1, p1.eccentricity,
-                         p1.max_intensity, p1.min_intensity, p1.mean_intensity,
-                         p1.major_axis_length, p1.minor_axis_length, p1.orientation,
-                         p1.perimeter,
+            datarow = [x1, y1, s1, dnn1_1, dnn2_1, p1.eccentricity,
+                     p1.max_intensity, p1.min_intensity, p1.mean_intensity,
+                     p1.major_axis_length, p1.minor_axis_length, p1.orientation,
+                     p1.perimeter,
 
-                         x2, y2, s2, dnn1_2, dnn2_2, p2.eccentricity,
-                         p2.max_intensity, p2.min_intensity, p2.mean_intensity,
-                         p2.major_axis_length, p2.minor_axis_length, p2.orientation,
-                         p2.perimeter,
+                     x2, y2, s2, dnn1_2, dnn2_2, p2.eccentricity,
+                     p2.max_intensity, p2.min_intensity, p2.mean_intensity,
+                     p2.major_axis_length, p2.minor_axis_length, p2.orientation,
+                     p2.perimeter,
 
-                         p_list[4], p_list[5]
-                         ]
-                for i in range(len(datarow)):
-                    couples.write(row, i, datarow[i])
+                     p_list[4], p_list[5]
+                     ]
+            for i in range(len(datarow)):
+                couples.write(row, i, datarow[i])
             row += 1
 
         spots1 = workbook.add_worksheet(name=f"Spots ch{channels[0]}")
@@ -893,13 +1034,9 @@ class SpatialRelations:
         for t in range(len(titles)):
             spots1.write(0, t, titles[t])
         row = 1
-        for (p1, s1, (y1, x1)) in self.MPP1_ROI:
-            coupled = 0
-            coupling_prob = 0
-            for xa, ya, xb, yb, dist, p, _, _ in prob_write:
-                if (y1, x1) == (ya, xa):
-                    coupled = 1
-                    coupling_prob = p
+        for idx_1, (p1, s1, (y1, x1)) in enumerate(self.MPP1_ROI):
+            coupled = int(channel1_coupled[idx_1])
+            coupling_prob = channel1_probability[idx_1]
             dnn1, nn1, angle = self.neighbors[0][row-1]
             dnn2, nn2, angle = self.neighbors[1][row-1]
             datarow = [x1, y1, s1, dnn1, dnn2, p1.eccentricity,
@@ -918,13 +1055,9 @@ class SpatialRelations:
             spots2.write(0, t, titles[t])
         row = 1
 
-        for p2, s2, (y2, x2) in self.MPP2_ROI:
-            coupled = 0
-            coupling_prob = 0
-            for xc, yc, xd, yd, dist, p, _, _ in prob_write:
-                if (y2, x2) == (yd, xd):
-                    coupled = 1
-                    coupling_prob = p
+        for idx_2, (p2, s2, (y2, x2)) in enumerate(self.MPP2_ROI):
+            coupled = int(channel2_coupled[idx_2])
+            coupling_prob = channel2_probability[idx_2]
             dnn1, nn1, angle = self.neighbors[3][row-1]
             dnn2, nn2, angle = self.neighbors[2][row-1]
             datarow = [x2, y2, s2, dnn1, dnn2, p2.eccentricity,

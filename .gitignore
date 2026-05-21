@@ -1,2 +1,18 @@
 
 *.pyc
+__pycache__/
+.venv/
+.DS_Store
+.idea/
+
+# Local analysis outputs and proof-of-concept artifacts.
+proof_of_concept_2D/
+*_output/
+*_outputs/
+prepared_inputs/
+combined_pySODA_results.csv
+combined_pySODA_results.xlsx
+pooled_pySODA_stats.csv
+combined_SODA_rings.csv
+pooled_SODA_rings.csv
+pooled_SODA_rings_*.pdf

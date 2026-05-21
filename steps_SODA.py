@@ -198,18 +198,21 @@ class SodaImageAnalysis:
         print("================================"
               "\nCoupling Index 0:", results_dict['coupling_index'][0],
               "\nCoupling Index 1:", results_dict['coupling_index'][1],
-              "\nMean Coupling Distance:", results_dict['mean_coupling_distance'], "pixels")
+              "\nMean Coupling Distance:", results_dict['mean_coupling_distance'], "pixels",
+              "\nSODA p-value:", results_dict['soda_p_value'],
+              "\nG0 max:", results_dict['g0_max'],
+              "\nG0 threshold:", results_dict['g0_threshold'])
 
         probs = np.ndarray.tolist(results_dict['coupling_probabilities'])
         print('Coupling probabilities: ', probs, '\n\n')
 
         # Coupling prob. by distance histogram
         if self.params['write_hist']:
-            self.write_prob_histogram(probs, ch0, ch1)
+            self.write_prob_histogram(probs, ch0, ch1, results_dict)
 
         return SR, prob_write, results_dict
 
-    def write_prob_histogram(self, probs, ch0, ch1):
+    def write_prob_histogram(self, probs, ch0, ch1, results=None):
         dists = [i * self.params['ring_width'] for i in range(self.params['n_rings'])]
         plt.ylim(0, 1.0)
         plt.bar(dists, probs, align='edge', width=self.params['ring_width'], edgecolor='black', linewidth=0.75)
@@ -219,6 +222,37 @@ class SodaImageAnalysis:
         plt.savefig(os.path.join(self.output_dir, 'hist_{}_ch{}{}.pdf'.format(os.path.basename(self.file), ch0, ch1)),
                     bbox_inches='tight', transparent=True, dpi=600)
         plt.close()
+
+        if results is not None:
+            labels = ['ch{} -> ch{}'.format(ch0, ch1), 'ch{} -> ch{}'.format(ch1, ch0)]
+            values = [
+                results['coupling_index_percent'][0],
+                results['coupling_index_percent'][1],
+            ]
+            fig, ax = plt.subplots(figsize=(4.5, 4))
+            bars = ax.bar(labels, values, color=['#2f80ed', '#c13f8a'], edgecolor='black', linewidth=0.75)
+            ax.set_ylim(0, 100)
+            ax.set_ylabel('Coupling percent')
+            ax.set_title('Directional coupling index')
+            for bar, value in zip(bars, values):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    min(value + 2, 98),
+                    '{:.1f}%'.format(value),
+                    ha='center',
+                    va='bottom',
+                )
+            fig.tight_layout()
+            fig.savefig(
+                os.path.join(
+                    self.output_dir,
+                    'coupling_percent_{}_ch{}{}.pdf'.format(os.path.basename(self.file), ch0, ch1),
+                ),
+                bbox_inches='tight',
+                transparent=True,
+                dpi=600,
+            )
+            plt.close(fig)
 
     def soda_analysis(self):
         """
@@ -237,7 +271,13 @@ class SodaImageAnalysis:
         for ch0, ch1 in channel_pairs:
             print('- Channels {} and {} -'.format(ch0, ch1))
             SR, prob_write, results_dict = self.spatial_relations(ch0, ch1)
-            SR.write_spots_and_probs(prob_write, self.output_dir, 'pySODA_' + self.file + '_ch{}{}.xlsx'.format(ch0, ch1), channels=[ch0, ch1])
+            SR.write_spots_and_probs(
+                prob_write,
+                self.output_dir,
+                'pySODA_' + self.file + '_ch{}{}.xlsx'.format(ch0, ch1),
+                channels=[ch0, ch1],
+                results=results_dict,
+            )
             out_results['ch{}-ch{}'.format(ch0, ch1)] = results_dict
 
         return out_results
@@ -256,7 +296,10 @@ def main(directory, output_dir, params):
     worksheets = []
     worksheet_names = []
     titles = ['File', 'Spots in channel 0', 'Spots in channel 1', 'Number of couples',
-              'Coupling index 0', 'Coupling index 1', 'Weighted mean coupling distance']
+              'Coupling index 0', 'Coupling index 1', 'Coupling percent 0', 'Coupling percent 1',
+              'Weighted mean coupling distance', 'SODA p-value', 'SODA p-value display', 'SODA log10(p-value)',
+              'G0 max', 'G0 max ring index', 'G0 threshold', 'Number of significant rings',
+              'Significant ring ranges (px)']
     row = 1
     for sheet in worksheets:
         for t in range(len(titles)):
@@ -294,7 +337,17 @@ def main(directory, output_dir, params):
                              results['n_couples'],
                              results['coupling_index'][0],
                              results['coupling_index'][1],
-                             results['mean_coupling_distance']]
+                             results['coupling_index_percent'][0],
+                             results['coupling_index_percent'][1],
+                             results['mean_coupling_distance'],
+                             results['soda_p_value'],
+                             results['soda_p_value_text'],
+                             results['soda_p_value_log10'],
+                             results['g0_max'],
+                             results['g0_max_ring_index'],
+                             results['g0_threshold'],
+                             results['n_significant_rings'],
+                             ', '.join(results['significant_ring_ranges_px'])]
                 if sheet_name not in worksheet_names:
                     worksheet_names.append(sheet_name)
                     worksheets.append(results_workbook.add_worksheet(name=sheet_name))

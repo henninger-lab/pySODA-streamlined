@@ -1,0 +1,26 @@
+[project]
+name = "pysoda-lab"
+version = "0.1.0"
+description = "pySODA workflows with selected-channel CZI/OME-TIFF loading and pooled SODA summaries."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "aicspylibczi>=3.3.1",
+    "imagecodecs>=2024.12.30",
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+    "openpyxl>=3.1",
+    "pandas>=2.2",
+    "scikit-image>=0.23",
+    "scipy>=1.13",
+    "tifffile>=2024.8.30",
+    "xlsxwriter>=3.2",
+]
+
+[project.optional-dependencies]
+3d = [
+    "torch>=2.6",
+]
+
+[tool.uv]
+package = false
